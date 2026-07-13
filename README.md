@@ -1,88 +1,62 @@
 # mahjong-bot
 
-Heuristic mahjong bot for [mahjong-table](../mahjong-table). Unified shanten, EV scoring, optional Monte Carlo, and **v2 self-play** data collection for ML.
+Heuristic mahjong AI for [mahjong-table](../mahjong-table) — EV decision-making, bitboard search, and a self-play data pipeline built for ML.
+
+## Highlights
+
+| Area | What it does |
+|------|----------------|
+| **Unified shanten** | Standard 4-sets+pair, **seven pairs**, **thirteen orphans** — pick the best line |
+| **Expected value** | Scores every legal action: shanten, fan ceiling, draw odds, deal-in danger, match context |
+| **Bitboards** | `Uint8Array(34)` hand / wall state for fast eval and Monte Carlo rollouts |
+| **Win-rate model** | Exact \(P(\text{tenpai})\), \(P(\text{improve})\) on next draw from remaining tiles |
+| **Monte Carlo** | Optional rollout search blended with EV (`search: "mc"`) |
+| **Self-play v2** | Softmax exploration (dynamic \(\tau\)), claim frames, counterfactual EVs, hand/match rewards |
+| **Benchmarked** | Heuristic **6–0** vs random (5 matches, +80/−80) — frozen baseline in `benchmarks/` |
+
+```
+DecisionPrompt + public view
+        │
+        ▼
+ tile-tracker → shanten → fan · win-rate · threat
+        │
+        ▼
+   EV scorer  (+ optional MC)
+        │
+        ▼
+   best action  │  self-play JSONL → join-rewards → train later
+```
 
 ## Quick start
 
 ```bash
-npm install
-npm run build
-npm test              # full suite (~2 min)
-npm run test:unit     # unit only (~3s)
+npm install && npm run build
+npm test                  # unit + engine contract + bench gate
+npm run bench             # heuristic vs random
 ```
-
-### Self-play data pipeline (v2)
-
-```bash
-# Collect exploration data (softmax sampling, auto-creates data/)
-MATCHES=50 TEMPERATURE=1.2 npm run self-play
-
-# Join decisions → training rows with hand/match rewards
-npm run join-rewards -- data/self-play.jsonl data/training.jsonl
-
-# Suggest heuristic weight tweaks
-npm run tune -- data/self-play.jsonl
-```
-
-### Benchmark baseline (track improvement)
-
-Your first run is saved as the reference point:
-
-**`benchmarks/baseline-v0.3-pre-self-play.json`** — 6–0 wins, +80/−80 (2026-07-05)
-
-After self-play or weight tuning, record a new run and compare:
-
-```bash
-npm run bench:record -- "after 50-match self-play tune"
-```
-
-Writes `benchmarks/runs/<timestamp>.json` and prints delta vs baseline.
-
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `MATCHES` | 3 | Number of 4-bot matches |
-| `MAX_ACTIONS` | 400 | Safety cap per match |
-| `OUT` | `data/self-play.jsonl` | Output path |
-| `TEMPERATURE` | 1.2 | Base softmax τ (dynamic schedule applied) |
-| `DETERMINISTIC` | off | Set `1` for argmax (eval runs) |
-
-## v2 JSONL schema
-
-**Decision row** — one per bot choice (draw, discard, claim, pass):
-
-- `state.hand` — base64 concealed counts (34 bytes)
-- `state.discards` — 4× base64 planes (self, right, across, left)
-- `state.melds` — `[relSeat, kind, tileIdx, open]` tuples
-- `state.remaining` / `state.exhausted` — wall + kabe planes
-- `state.scalars` — wall, shanten, scores, dealer, phase, open melds
-- `legal[]` — every action with **counterfactual EV**
-- `chosen` — index into `legal`
-- `claim` — `{ from, tile }` on claim windows
-- `tau`, `sampled` — exploration metadata
-
-**Hand end** — `scoreDelta[4]` per seat after each scored hand.
-
-**Match end** — `placement[4]`, `finalScores`, `startScores`.
-
-**Training row** (from `join-rewards`) — decision + `handReward` + `matchReward` + `placement`.
-
-## API
 
 ```typescript
-import { createSelfPlayStrategy, joinRewards, SCHEMA_VERSION } from "mahjong-bot";
+import { heuristicStrategy, createHeuristicStrategy } from "mahjong-bot";
 
-const strategy = createSelfPlayStrategy({
-  matchId: "run-1",
-  temperature: 1.2,
-  deterministic: false,
-  onLog: (row) => { /* JSONL */ },
-  getDecisionIndex: () => n,
-  bumpDecisionIndex: () => { n++; },
-  getInitialWall: () => 80,
-});
+createHeuristicStrategy({ profile: "aggressive" }); // speed | balanced | aggressive | defensive
+createHeuristicStrategy({ search: "mc", mcRollouts: 32 });
 ```
 
-Production play still uses `heuristicStrategy` (argmax EV, no logging).
+`mahjong-table` loads `heuristicStrategy` by default.
+
+## Self-play → ML-ready data
+
+```bash
+MATCHES=50 TEMPERATURE=1.2 npm run self-play
+npm run join-rewards -- data/self-play.jsonl data/training.jsonl
+npm run bench:record -- "after tune"   # delta vs baseline
+```
+
+Each decision logs seat-relative state planes (base64), full `legal[]` with EVs, chosen index, and joined hand/match rewards — built for policy distillation / value learning, not just telemetry.
+
+## Stack
+
+TypeScript · bitboard counts · softmax exploration · JSONL self-play · headless table sims
 
 ## License
 
