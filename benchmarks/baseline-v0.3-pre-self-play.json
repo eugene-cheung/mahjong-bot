@@ -1,0 +1,18 @@
+{
+  "label": "v0.3 heuristic — pre self-play (initial baseline)",
+  "recordedAt": "2026-07-05T21:19:00.000Z",
+  "recordedBy": "manual first run",
+  "notes": "First benchmark before self-play data collection or weight tuning. Heuristic EV bot vs built-in random bot.",
+  "elapsedMs": null,
+  "config": {
+    "matches": 5,
+    "maxActions": 400,
+    "seedBase": 10000,
+    "ruleset": "hong-kong",
+    "maxHands": 2
+  },
+  "heuristicWins": 6,
+  "randomWins": 0,
+  "heuristicScoreSum": 80,
+  "randomScoreSum": -80
+}

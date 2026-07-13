@@ -1,0 +1,30 @@
+{
+  "name": "mahjong-bot",
+  "version": "0.1.0",
+  "description": "Heuristic mahjong bot for mahjong-table — shanten-based discards and claim policy",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && tsx scripts/run-tests.ts",
+    "test:unit": "npm run build && SKIP_INTEGRATION=1 tsx scripts/run-tests.ts",
+    "bench": "npm run build && tsx scripts/bench.ts",
+    "bench:record": "npm run build && tsx scripts/record-bench.ts",
+    "self-play": "npm run build && tsx scripts/self-play.ts",
+    "join-rewards": "npm run build && tsx scripts/join-rewards.ts",
+    "tune": "npm run build && tsx scripts/tune-weights.ts"
+  },
+  "devDependencies": {
+    "mahjong-table": "file:../mahjong-table",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "license": "MIT"
+}
