@@ -1,7 +1,7 @@
 {
   "name": "mahjong-bot",
   "version": "0.1.0",
-  "description": "Heuristic mahjong bot for mahjong-table — shanten-based discards and claim policy",
+  "description": "Mahjong decision engine — EV search, self-play datasets, and neural policy distillation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,20 @@
     "bench:record": "npm run build && tsx scripts/record-bench.ts",
     "self-play": "npm run build && tsx scripts/self-play.ts",
     "join-rewards": "npm run build && tsx scripts/join-rewards.ts",
-    "tune": "npm run build && tsx scripts/tune-weights.ts"
+    "tune": "npm run build && tsx scripts/tune-weights.ts",
+    "ml:train": "python -m ml.train --data data/training.jsonl --out experiments/002_policy_distill/runs"
+  },
+  "keywords": [
+    "mahjong",
+    "reinforcement-learning",
+    "self-play",
+    "imitation-learning",
+    "policy-distillation",
+    "game-ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eugene-cheung/mahjong-bot.git"
   },
   "devDependencies": {
     "mahjong-table": "file:../mahjong-table",

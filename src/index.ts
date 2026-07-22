@@ -8,10 +8,12 @@ export type { HeuristicOptions, HandShape, ShantenResult } from "./strategy.js";
 export type { BotProfile, EvWeights } from "./eval/profiles.js";
 export { PROFILES, DEFAULT_PROFILE } from "./eval/profiles.js";
 export { TileTracker, usefulDrawScore } from "./eval/tile-tracker.js";
-export { estimateFanPotential } from "./eval/fan-potential.js";
+export { estimateFanPotential, seatWindFor } from "./eval/fan-potential.js";
 export { resolveWeights } from "./eval/match-context.js";
-export { scoreAction, scoreAllActions, pickBestAction } from "./eval/ev-scorer.js";
+export { scoreAction, scoreAllActions, pickBestAction, bestPostClaimDiscardEv } from "./eval/ev-scorer.js";
 export { estimateWinRate, winRateScore } from "./eval/win-rate.js";
+export { enumerateWaits, waitQualityScore } from "./eval/waits.js";
+export { discardDanger, maxOpponentThreat, isGenbutsu } from "./eval/opponent-threat.js";
 export { pickBestActionMonteCarlo } from "./eval/monte-carlo.js";
 export { HandCounts, ORPHAN_INDICES, NUM_TILE_TYPES } from "./bitboard.js";
 export {
@@ -19,6 +21,7 @@ export {
   createLoggingStrategy,
   handEndRecord,
   matchEndRecord,
+  placementFromScores,
   joinRewards,
   loadSelfPlayRecords,
   parseSelfPlayLine,

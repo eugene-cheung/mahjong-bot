@@ -107,6 +107,18 @@ const kongBad: LegalAction = { command: { type: "kong", tileId: "wan-1", conceal
 assertTrue("open kong with 3 in hand succeeds", simulateClaim(kongHand, kongOk) !== null);
 assertTrue("open kong without 3 in hand fails", simulateClaim(kongHand, kongBad) === null);
 
+section("simulateClaim add-kong promotes open pung");
+
+const addKongHand = {
+  concealed: ["bing-9", "wan-1", "wan-2", "wan-3", "wan-4", "wan-5", "wan-6", "wan-7", "wan-8", "east"] as TileId[],
+  melds: [{ kind: "pung" as const, tiles: ["bing-9", "bing-9", "bing-9"] as TileId[], open: true, claimedTile: "bing-9" as TileId }],
+};
+const addKong: LegalAction = { command: { type: "kong", tileId: "bing-9", concealed: false }, label: "Add Kong" };
+const afterAdd = simulateClaim(addKongHand, addKong);
+assertTrue("add-kong removes one from hand", afterAdd !== null && !afterAdd.concealed.includes("bing-9"));
+assertEq("add-kong upgrades pung to kong", afterAdd!.melds[0]?.kind, "kong");
+assertEq("add-kong keeps one meld", afterAdd!.melds.length, 1);
+
 section("scoreAction prioritizes hu");
 
 const promptHu: DecisionPrompt = {
@@ -237,6 +249,41 @@ const safeTile = threatView.hands.east.concealed.find(
   (t) => safeDiscard.command.type === "discard" && t.instanceId === safeDiscard.command.instanceId,
 )?.tileId;
 assertEq("defensive dumps exhausted wan-5", safeTile, "wan-5");
+
+section("post-claim discard is scored");
+
+// Claiming a pung of wan-2 leaves an awkward 11-tile hand; forced discard matters.
+const claimView = viewForEast([
+  { id: "wan-2", inst: "a" },
+  { id: "wan-2", inst: "b" },
+  { id: "wan-5", inst: "c" },
+  { id: "bing-1", inst: "d" },
+  { id: "bing-3", inst: "e" },
+  { id: "bing-7", inst: "f" },
+  { id: "tiao-1", inst: "g" },
+  { id: "tiao-4", inst: "h" },
+  { id: "tiao-8", inst: "i" },
+  { id: "east", inst: "j" },
+  { id: "south", inst: "k" },
+  { id: "west", inst: "l" },
+  { id: "red", inst: "m" },
+]);
+const claimPrompt: DecisionPrompt = {
+  seat: "east",
+  phase: "claim_window",
+  actions: [
+    { command: { type: "pass_claim" }, label: "Pass" },
+    { command: { type: "pung", tileId: "wan-2" }, label: "Pung" },
+  ],
+  view: claimView,
+};
+const claimTracker = TileTracker.fromView(claimView, "east");
+const pungEv = scoreAction(claimPrompt, claimPrompt.actions[1], PROFILES.balanced, claimTracker);
+const passEv = scoreAction(claimPrompt, claimPrompt.actions[0], PROFILES.balanced, claimTracker);
+assertTrue("pung EV is finite", Number.isFinite(pungEv));
+assertTrue("pass EV is finite", Number.isFinite(passEv));
+// Scattered hand: opening for wan-2 should not wildly outscore staying closed.
+assertTrue("claim EV does not explode vs pass", pungEv < passEv + 20);
 
 section("snapshotHand roundtrip");
 

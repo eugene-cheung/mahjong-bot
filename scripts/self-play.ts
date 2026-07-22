@@ -2,7 +2,7 @@
  * Self-play data collection — v2 JSONL with softmax exploration.
  * Usage: npm run self-play
  *
- * Env: MATCHES, MAX_ACTIONS, OUT, TEMPERATURE, DETERMINISTIC=1
+ * Env: MATCHES, MAX_ACTIONS, MAX_HANDS, OUT, TEMPERATURE, DETERMINISTIC=1
  */
 
 import { createWriteStream, mkdirSync } from "node:fs";
@@ -24,7 +24,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SEATS: Seat[] = ["east", "south", "west", "north"];
 const MATCHES = Number(process.env.MATCHES ?? 3);
-const MAX_ACTIONS = Number(process.env.MAX_ACTIONS ?? 400);
+/** High enough for a full 4-hand match; table still emits match_complete if capped. */
+const MAX_ACTIONS = Number(process.env.MAX_ACTIONS ?? 2500);
+const MAX_HANDS = Number(process.env.MAX_HANDS ?? 4);
 const OUT = process.env.OUT ?? path.join(__dirname, "..", "data", "self-play.jsonl");
 const TEMPERATURE = Number(process.env.TEMPERATURE ?? 1.2);
 const DETERMINISTIC = process.env.DETERMINISTIC === "1";
@@ -35,7 +37,7 @@ function zeroScores(): Record<Seat, number> {
 
 async function runMatch(seed: number, write: (entry: SelfPlayRecordV2) => void): Promise<void> {
   const matchId = `self-play-${seed}`;
-  const config = createDefaultMatchConfig("hong-kong", "east", { maxHands: 4 });
+  const config = createDefaultMatchConfig("hong-kong", "east", { maxHands: MAX_HANDS });
   config.seed = seed;
   config.matchId = matchId;
   config.seats = SEATS.map((seat) => ({
@@ -51,6 +53,7 @@ async function runMatch(seed: number, write: (entry: SelfPlayRecordV2) => void):
   let initialWall = 80;
   let handsPlayed = 0;
   let matchStartCaptured = false;
+  let matchEnded = false;
 
   const table = new Table(config, (seat, _kind, displayName) => {
     const strategy = createSelfPlayStrategy({
@@ -91,6 +94,7 @@ async function runMatch(seed: number, write: (entry: SelfPlayRecordV2) => void):
       );
     }
     if (event.type === "match_complete") {
+      matchEnded = true;
       write(
         matchEndRecord(matchId, event.finalScores, matchStartScores, handsPlayed),
       );
@@ -101,6 +105,13 @@ async function runMatch(seed: number, write: (entry: SelfPlayRecordV2) => void):
   });
 
   await table.start({ maxActions: MAX_ACTIONS });
+
+  // Belt-and-suspenders: never leave a match without match_end (joinRewards needs it).
+  if (!matchEnded) {
+    write(
+      matchEndRecord(matchId, table.engine.getState().scores, matchStartScores, handsPlayed),
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -113,7 +124,9 @@ async function main(): Promise<void> {
   };
 
   console.log(`Self-play v2 → ${OUT}`);
-  console.log(`  matches=${MATCHES} temperature=${TEMPERATURE} deterministic=${DETERMINISTIC}`);
+  console.log(
+    `  matches=${MATCHES} maxHands=${MAX_HANDS} maxActions=${MAX_ACTIONS} temperature=${TEMPERATURE} deterministic=${DETERMINISTIC}`,
+  );
 
   for (let i = 0; i < MATCHES; i++) {
     process.stderr.write(`  match ${i + 1}/${MATCHES}…\n`);

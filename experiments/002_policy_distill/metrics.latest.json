@@ -1,0 +1,24 @@
+{
+  "run_id": "20260722-154358",
+  "rows": 12011,
+  "best_val_top1_multi": 0.3993987083435059,
+  "final_val": {
+    "loss": 1.0299714922904968,
+    "ce": 0.48255457282066344,
+    "kl": 0.20794920325279237,
+    "value_mse": 1.7737692594528198,
+    "top1": 0.8549684047698974,
+    "top3": 0.922989821434021,
+    "top1_multi": 0.3934749484062195,
+    "top3_multi": 0.6746148347854615,
+    "multi_frac": 0.2393258422613144,
+    "chosen_match": 0.8348490118980407
+  },
+  "gates": {
+    "top1_multi_target": 0.4,
+    "top3_multi_target": 0.7,
+    "top1_multi_pass": false,
+    "top3_multi_pass": false
+  },
+  "note": "top1/top3 = agreement with teacher argmax(EV); multi_* excludes singleton legal sets"
+}

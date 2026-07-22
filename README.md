@@ -1,62 +1,60 @@
 # mahjong-bot
 
-Heuristic mahjong AI for [mahjong-table](../mahjong-table) — EV decision-making, bitboard search, and a self-play data pipeline built for ML.
+**Experiment lab** for a mahjong decision engine — search-based EV teacher, self-play dataset, and neural policy/value distillation.
 
-## Highlights
+Sibling game client: [mahjong-table](https://github.com/eugene-cheung/mahjong-table) · Live demo: https://mj-house.fly.dev
 
-| Area | What it does |
-|------|----------------|
-| **Unified shanten** | Standard 4-sets+pair, **seven pairs**, **thirteen orphans** — pick the best line |
-| **Expected value** | Scores every legal action: shanten, fan ceiling, draw odds, deal-in danger, match context |
-| **Bitboards** | `Uint8Array(34)` hand / wall state for fast eval and Monte Carlo rollouts |
-| **Win-rate model** | Exact \(P(\text{tenpai})\), \(P(\text{improve})\) on next draw from remaining tiles |
-| **Monte Carlo** | Optional rollout search blended with EV (`search: "mc"`) |
-| **Self-play v2** | Softmax exploration (dynamic \(\tau\)), claim frames, counterfactual EVs, hand/match rewards |
-| **Benchmarked** | Heuristic **6–0** vs random (5 matches, +80/−80) — frozen baseline in `benchmarks/` |
+## Why this repo exists
+
+Most mahjong bots stop at heuristics. This one is structured like an ML research loop:
+
+1. **Strong teacher** — multi-signal expected-value search (shanten, fan, ukeire, defense, match context) + optional Monte Carlo
+2. **Self-play data** — seat-relative bitboard planes, full legal-action EVs, softmax exploration, credit-assigned rewards
+3. **Distillation** — PyTorch policy+value student trained to match the teacher ranking (not just argmax BC)
 
 ```
-DecisionPrompt + public view
-        │
-        ▼
- tile-tracker → shanten → fan · win-rate · threat
-        │
-        ▼
-   EV scorer  (+ optional MC)
-        │
-        ▼
-   best action  │  self-play JSONL → join-rewards → train later
+self-play (TS) ──JSONL──▶ join-rewards ──▶ distill (PyTorch)
+       ▲                                         │
+       └──────── benchmarks / gates ◀────────────┘
 ```
+
+## Experiments
+
+| Exp | What | Status |
+|-----|------|--------|
+| [000 heuristic EV](experiments/000_heuristic_ev/) | Teacher bot — **6–0 vs random** frozen baseline | done |
+| [001 self-play dataset](experiments/001_self_play_dataset/) | Schema-v2 trajectories for training | done |
+| [002 policy distill](experiments/002_policy_distill/) | Neural student imitating EV teacher + value head | active |
+
+See [`experiments/README.md`](experiments/README.md).
 
 ## Quick start
 
 ```bash
-npm install && npm run build
-npm test                  # unit + engine contract + bench gate
-npm run bench             # heuristic vs random
+# TypeScript engine + benches
+npm install && npm test
+npm run bench
+
+# Self-play → training rows
+MATCHES=50 TEMPERATURE=1.2 npm run self-play
+npm run join-rewards -- data/self-play.jsonl data/training.jsonl
+
+# Neural distill
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r ml/requirements.txt
+python -m ml.train --data data/training.jsonl --out experiments/002_policy_distill/runs
 ```
 
 ```typescript
 import { heuristicStrategy, createHeuristicStrategy } from "mahjong-bot";
 
-createHeuristicStrategy({ profile: "aggressive" }); // speed | balanced | aggressive | defensive
+createHeuristicStrategy({ profile: "aggressive" });
 createHeuristicStrategy({ search: "mc", mcRollouts: 32 });
 ```
 
-`mahjong-table` loads `heuristicStrategy` by default.
-
-## Self-play → ML-ready data
-
-```bash
-MATCHES=50 TEMPERATURE=1.2 npm run self-play
-npm run join-rewards -- data/self-play.jsonl data/training.jsonl
-npm run bench:record -- "after tune"   # delta vs baseline
-```
-
-Each decision logs seat-relative state planes (base64), full `legal[]` with EVs, chosen index, and joined hand/match rewards — built for policy distillation / value learning, not just telemetry.
-
 ## Stack
 
-TypeScript · bitboard counts · softmax exploration · JSONL self-play · headless table sims
+TypeScript (engine, EV, self-play) · bitboards · PyTorch (policy/value distill) · JSONL datasets · headless match sims
 
 ## License
 

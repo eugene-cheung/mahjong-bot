@@ -41,4 +41,30 @@ const twFull = estimateFanPotential(flushConcealed, [], "taiwanese");
 const hkFull = estimateFanPotential(flushConcealed, [], "hong-kong");
 assertGte("TW full flush > HK", twFull, hkFull);
 
+section("dragon / wind bonuses");
+
+const dragonMelds: Meld[] = [{ kind: "pung", tiles: ["red", "red", "red"], open: true }];
+const withDragon = estimateFanPotential(
+  ["wan-1", "wan-2", "wan-3", "wan-4", "wan-5", "wan-6", "bing-1", "bing-2", "bing-3", "east"],
+  dragonMelds,
+  "hong-kong",
+);
+assertGte("dragon pung adds value vs chicken-ish", withDragon, 1);
+
+section("seat wind context");
+
+const seatCtx = estimateFanPotential(
+  ["east", "east", "east", "wan-1", "wan-2", "wan-3", "wan-4", "wan-5", "wan-6", "bing-2", "bing-3", "bing-4", "tiao-5"],
+  [],
+  "hong-kong",
+  "standard",
+  { seat: "east", dealer: "east", roundWind: "east" },
+);
+const noCtx = estimateFanPotential(
+  ["east", "east", "east", "wan-1", "wan-2", "wan-3", "wan-4", "wan-5", "wan-6", "bing-2", "bing-3", "bing-4", "tiao-5"],
+  [],
+  "hong-kong",
+);
+assertGte("seat+round wind pung credit >= no context", seatCtx, noCtx);
+
 console.log("\nAll fan-potential tests passed");

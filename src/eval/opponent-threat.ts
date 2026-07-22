@@ -1,4 +1,4 @@
-import type { GameState, Seat } from "../protocol.js";
+import type { GameState, Seat, TileId } from "../protocol.js";
 import { SEATS } from "../protocol.js";
 
 /** Normalized 0–1 threat that an opponent is close to winning. */
@@ -40,6 +40,22 @@ function isHonorOrTerminal(id: string): boolean {
   return rank === 1 || rank === 9;
 }
 
+/** True if this opponent has already discarded this tile (genbutsu). */
+export function isGenbutsu(view: GameState, opponent: Seat, tileId: TileId): boolean {
+  return (view.discards ?? []).some((d) => d.seat === opponent && d.tile.tileId === tileId);
+}
+
+/** How many threatening opponents treat this tile as genbutsu. */
+export function genbutsuCount(view: GameState, botSeat: Seat, tileId: TileId): number {
+  let n = 0;
+  for (const seat of SEATS) {
+    if (seat === botSeat) continue;
+    if (seatThreat(view, seat) < 0.2) continue;
+    if (isGenbutsu(view, seat, tileId)) n++;
+  }
+  return n;
+}
+
 /** P(deal-in) proxy for discarding tileId (0 = safe, 1 = very dangerous). */
 export function discardDanger(view: GameState, botSeat: Seat, tileId: string, exhausted: boolean): number {
   if (exhausted) return 0;
@@ -48,17 +64,32 @@ export function discardDanger(view: GameState, botSeat: Seat, tileId: string, ex
 
   let danger = threat * 0.4;
 
+  // Genbutsu against threatening opponents is much safer.
+  const gen = genbutsuCount(view, botSeat, tileId as TileId);
+  if (gen > 0) {
+    danger *= Math.max(0.15, 1 - 0.35 * gen);
+  }
+
   // Tile fits a suit an opponent never discarded — likely kept for a flush/wait.
   for (const seat of SEATS) {
     if (seat === botSeat) continue;
+    const theirThreat = seatThreat(view, seat);
+    if (theirThreat < 0.25) continue;
+    if (isGenbutsu(view, seat, tileId as TileId)) continue;
+
     const theirDiscards = (view.discards ?? []).filter((d) => d.seat === seat).map((d) => d.tile.tileId);
     if (theirDiscards.length < 4) continue;
     const tileSuit = tileId.split("-")[0];
     if (!tileSuit || !["wan", "tiao", "bing"].includes(tileSuit)) continue;
     const dumpedSuit = theirDiscards.some((d) => d.startsWith(tileSuit + "-"));
     if (!dumpedSuit && view.hands[seat].melds.length >= 1) {
-      danger += 0.25;
+      danger += 0.25 * theirThreat;
     }
+  }
+
+  // Live middle tiles are hotter when someone looks close.
+  if (!isHonorOrTerminal(tileId) && threat >= 0.45 && gen === 0) {
+    danger += 0.12;
   }
 
   return Math.min(1, danger);

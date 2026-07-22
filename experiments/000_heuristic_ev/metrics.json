@@ -1,0 +1,13 @@
+{
+  "experiment": "000_heuristic_ev",
+  "baselineRef": "benchmarks/baseline-v0.3-pre-self-play.json",
+  "matchup": "heuristic_vs_random",
+  "matches": 5,
+  "maxHands": 2,
+  "ruleset": "hong-kong",
+  "heuristicWins": 6,
+  "randomWins": 0,
+  "heuristicScoreSum": 80,
+  "randomScoreSum": -80,
+  "notes": "Pre self-play / pre-distill frozen gate."
+}

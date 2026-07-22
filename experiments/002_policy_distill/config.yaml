@@ -1,0 +1,15 @@
+# 002 policy distill — config snapshot
+
+data: data/training.jsonl   # or data/training-run1.jsonl
+epochs: 8
+batch_size: 128
+lr: 0.001
+hidden: 256
+max_actions: 24
+losses:
+  ce: chosen action
+  kl: softmax(EV/tau) teacher
+  value: handReward + matchReward
+gates:
+  holdout_top1: 0.55
+  holdout_top3: 0.80

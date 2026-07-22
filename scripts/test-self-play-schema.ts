@@ -28,7 +28,8 @@ const run = spawnSync("npx", ["tsx", path.join(__dirname, "self-play.ts")], {
   env: {
     ...process.env,
     MATCHES: "1",
-    MAX_ACTIONS: "250",
+    MAX_ACTIONS: "2500",
+    MAX_HANDS: "2",
     OUT: samplePath,
     DETERMINISTIC: "1",
   },
@@ -60,6 +61,13 @@ assertEq("training rows match decisions", joined.trainingRows.length, decisions.
 assertTrue(
   "training rows have reward fields",
   joined.trainingRows.every((r) => typeof r.handReward === "number" && typeof r.matchReward === "number"),
+);
+
+const matchEnds = records.filter((r) => r.kind === "match_end");
+assertEq("exactly one match_end", matchEnds.length, 1);
+assertTrue(
+  "match rewards are populated from placement",
+  joined.trainingRows.some((r) => r.matchReward !== 0),
 );
 
 console.log("\nAll self-play schema tests passed");

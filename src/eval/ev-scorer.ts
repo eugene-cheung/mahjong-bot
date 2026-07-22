@@ -5,6 +5,7 @@ import type { EvWeights } from "./profiles.js";
 import { handShantenCounts } from "../shanten/index.js";
 import { TileTracker, usefulDrawScore } from "./tile-tracker.js";
 import { estimateWinRate, winRateScore } from "./win-rate.js";
+import { enumerateWaits, waitQualityScore } from "./waits.js";
 import { countsFromIds, allMeldTiles } from "../tiles.js";
 
 const WIN_SCORE = 1_000_000;
@@ -22,6 +23,15 @@ export function snapshotHand(view: GameState, seat: Seat): HandSnapshot {
   };
 }
 
+function fanContext(view: GameState, seat: Seat) {
+  return {
+    seat,
+    dealer: view.dealer?.dealer,
+    roundWind: view.dealer?.roundWind,
+    revealedBonus: view.hands[seat]?.revealedBonus,
+  };
+}
+
 function evalHand(
   view: GameState,
   seat: Seat,
@@ -31,18 +41,75 @@ function evalHand(
 ): number {
   const handCounts = countsFromIds(snap.concealed);
   const shResult = handShantenCounts(handCounts, snap.melds.length);
-  const fan = estimateFanPotential(snap.concealed, snap.melds, view.rulesetId, shResult.shape);
+  const fan = estimateFanPotential(
+    snap.concealed,
+    snap.melds,
+    view.rulesetId,
+    shResult.shape,
+    fanContext(view, seat),
+  );
   const winRate = estimateWinRate(tracker, handCounts, snap.melds.length);
   const draw = usefulDrawScore(tracker, handCounts) * 0.35 + winRateScore(winRate) * 0.65;
   const threat = maxOpponentThreat(view, seat);
+  const waits =
+    shResult.shanten === 0 ? enumerateWaits(handCounts, snap.melds.length, tracker) : null;
+  const waitBonus = waits ? weights.draw * waitQualityScore(waits) : 0;
 
   return (
     -weights.shanten * shResult.shanten +
     weights.fan * fan +
     weights.draw * draw +
-    weights.winRate * winRateScore(winRate) -
+    weights.winRate * winRateScore(winRate) +
+    waitBonus -
     weights.danger * threat * 0.15
   );
+}
+
+function discardEv(
+  view: GameState,
+  seat: Seat,
+  after: HandSnapshot,
+  tileId: TileId,
+  weights: EvWeights,
+  tracker: TileTracker,
+): number {
+  const exhausted = tracker.isExhausted(tileId);
+  const threat = maxOpponentThreat(view, seat);
+  const danger = discardDanger(view, seat, tileId, exhausted);
+  const safetyBonus = exhausted ? weights.danger * (2 + threat * 5) : 0;
+  return (
+    evalHand(view, seat, after, weights, tracker) -
+    weights.danger * danger * (0.5 + threat) +
+    safetyBonus
+  );
+}
+
+/**
+ * After pung/chow the hand still holds a tile that must be discarded.
+ * Score the best forced discard (by tile type).
+ */
+export function bestPostClaimDiscardEv(
+  view: GameState,
+  seat: Seat,
+  after: HandSnapshot,
+  weights: EvWeights,
+  tracker: TileTracker,
+): number {
+  if (after.concealed.length === 0) {
+    return evalHand(view, seat, after, weights, tracker);
+  }
+
+  let best = -Infinity;
+  const seen = new Set<TileId>();
+  for (let i = 0; i < after.concealed.length; i++) {
+    const tileId = after.concealed[i]!;
+    if (seen.has(tileId)) continue;
+    seen.add(tileId);
+    const concealed = after.concealed.slice(0, i).concat(after.concealed.slice(i + 1));
+    const snap: HandSnapshot = { concealed, melds: after.melds };
+    best = Math.max(best, discardEv(view, seat, snap, tileId, weights, tracker));
+  }
+  return best;
 }
 
 function applyClaim(snap: HandSnapshot, claim: LegalAction): HandSnapshot | null {
@@ -68,14 +135,37 @@ function applyClaim(snap: HandSnapshot, claim: LegalAction): HandSnapshot | null
     }
     case "kong": {
       const tileId = claim.command.tileId;
+      const inHand = concealed.filter((t) => t === tileId).length;
+
+      // Add-kong: promote an open pung with the 4th tile from hand.
+      if (!claim.command.concealed) {
+        const pungIdx = melds.findIndex(
+          (m) => m.kind === "pung" && m.open && m.tiles[0] === tileId,
+        );
+        if (pungIdx >= 0 && inHand >= 1) {
+          const idx = concealed.indexOf(tileId);
+          concealed.splice(idx, 1);
+          melds[pungIdx] = {
+            kind: "kong",
+            tiles: [tileId, tileId, tileId, tileId],
+            open: true,
+            claimedTile: melds[pungIdx]!.claimedTile ?? tileId,
+          };
+          return { concealed, melds };
+        }
+      }
+
+      // Rob-discard kong: 3 in hand + discard.
+      // Concealed ankan: 4 in hand.
+      const need = claim.command.concealed ? 4 : 3;
+      if (inHand < need) return null;
       let removed = 0;
-      for (let i = concealed.length - 1; i >= 0 && removed < 3; i--) {
+      for (let i = concealed.length - 1; i >= 0 && removed < need; i--) {
         if (concealed[i] === tileId) {
           concealed.splice(i, 1);
           removed++;
         }
       }
-      if (!claim.command.concealed && removed < 3) return null;
       melds.push({
         kind: "kong",
         tiles: [tileId, tileId, tileId, tileId],
@@ -142,22 +232,23 @@ export function scoreAction(
     if (!after) return -Infinity;
     const tile = view.hands[seat].concealed.find((t) => t.instanceId === cmd.instanceId);
     const tileId = tile?.tileId ?? "wan-1";
-    const exhausted = tracker.isExhausted(tileId);
-    const threat = maxOpponentThreat(view, seat);
-    const danger = discardDanger(view, seat, tileId, exhausted);
-    const safetyBonus = exhausted ? weights.danger * (2 + threat * 5) : 0;
-    return (
-      evalHand(view, seat, after, weights, tracker) -
-      weights.danger * danger * (0.5 + threat) +
-      safetyBonus
-    );
+    return discardEv(view, seat, after, tileId, weights, tracker);
   }
 
-  if (cmd.type === "pung" || cmd.type === "chow" || cmd.type === "kong") {
+  if (cmd.type === "pung" || cmd.type === "chow") {
     const after = applyClaim(snap, action);
     if (!after) return -Infinity;
     const openPenalty = weights.fan * 0.8;
-    return evalHand(view, seat, after, weights, tracker) - openPenalty;
+    return bestPostClaimDiscardEv(view, seat, after, weights, tracker) - openPenalty;
+  }
+
+  if (cmd.type === "kong") {
+    const after = applyClaim(snap, action);
+    if (!after) return -Infinity;
+    const openPenalty = weights.fan * 0.8;
+    // Kong draws a replacement before discarding — credit the draw, then best discard.
+    const withDrawBonus = bestPostClaimDiscardEv(view, seat, after, weights, tracker) + weights.draw * 0.4;
+    return withDrawBonus - openPenalty;
   }
 
   return evalHand(view, seat, snap, weights, tracker);

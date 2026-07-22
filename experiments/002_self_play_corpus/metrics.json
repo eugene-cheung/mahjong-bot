@@ -1,0 +1,27 @@
+{
+  "experiment": "002_self_play_corpus",
+  "status": "done",
+  "claim": "Self-play JSONL is ML-ready (state planes + legal EVs + rewards)",
+  "protocol": {
+    "matches": 50,
+    "temperature": 1.2,
+    "schema": 2
+  },
+  "metrics": {
+    "sampleDecisions": "see data/training-run1.jsonl locally (~12k rows)",
+    "committedFixtureRows": 40,
+    "fields": [
+      "state.hand",
+      "state.discards",
+      "state.remaining",
+      "state.exhausted",
+      "state.scalars",
+      "legal[].ev",
+      "chosen",
+      "handReward",
+      "matchReward",
+      "placement"
+    ]
+  },
+  "verdict": "Encoding + reward join verified by unit tests. Ready for 003 distill."
+}

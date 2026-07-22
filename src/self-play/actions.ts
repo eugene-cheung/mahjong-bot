@@ -3,8 +3,10 @@ import { tileToIndex } from "../tiles.js";
 import type { EncodedLegalAction } from "./records.js";
 
 export function encodeLegalAction(action: LegalAction, id: number, ev: number): EncodedLegalAction {
+  // JSON cannot represent ±Infinity; keep training rows finite.
+  const finiteEv = Number.isFinite(ev) ? ev : ev > 0 ? 1e6 : -1e6;
   const cmd = action.command;
-  const base: EncodedLegalAction = { id, type: cmd.type, ev };
+  const base: EncodedLegalAction = { id, type: cmd.type, ev: finiteEv };
 
   if (cmd.type === "discard") {
     return { ...base, inst: cmd.instanceId };

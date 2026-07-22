@@ -1,12 +1,17 @@
 import type { DecisionPrompt, LegalAction, TileId } from "../protocol.js";
 import { HandCounts, NUM_TILE_TYPES } from "../bitboard.js";
 import { handShantenCounts } from "../shanten/index.js";
-import { countsFromIds, indexToTile } from "../tiles.js";
+import { indexToTile } from "../tiles.js";
 import { estimateFanPotential } from "./fan-potential.js";
-import { scoreAction } from "./ev-scorer.js";
 import type { EvWeights } from "./profiles.js";
 import type { TileTracker } from "./tile-tracker.js";
-import { simulateClaim, simulateDiscard, snapshotHand, type HandSnapshot } from "./ev-scorer.js";
+import {
+  scoreAction,
+  simulateClaim,
+  simulateDiscard,
+  snapshotHand,
+  type HandSnapshot,
+} from "./ev-scorer.js";
 import type { GameState, Seat } from "../protocol.js";
 
 export interface MonteCarloOptions {
@@ -22,21 +27,63 @@ function applyActionToCounts(
   seat: Seat,
   snap: HandSnapshot,
   action: LegalAction,
-): { counts: HandCounts; melds: HandSnapshot["melds"] } | null {
+  weights: EvWeights,
+): { counts: HandCounts; melds: HandSnapshot["melds"]; evBias: number } | null {
   if (action.command.type === "discard") {
     const after = simulateDiscard(view, seat, action.command.instanceId, snap.melds);
     if (!after) return null;
-    return { counts: HandCounts.fromIds(after.concealed), melds: after.melds };
+    return { counts: HandCounts.fromIds(after.concealed), melds: after.melds, evBias: 0 };
   }
   if (action.command.type === "pass_claim" || action.command.type === "draw") {
-    return { counts: HandCounts.fromIds(snap.concealed), melds: snap.melds };
+    return { counts: HandCounts.fromIds(snap.concealed), melds: snap.melds, evBias: 0 };
   }
   if (action.command.type === "hu" || action.command.type === "flower_win") {
-    return { counts: HandCounts.fromIds(snap.concealed), melds: snap.melds };
+    return { counts: HandCounts.fromIds(snap.concealed), melds: snap.melds, evBias: 0 };
   }
   const after = simulateClaim(snap, action);
   if (!after) return null;
-  return { counts: HandCounts.fromIds(after.concealed), melds: after.melds };
+
+  // Align MC start state with EV: pung/chow must discard; kong gets a small draw bias.
+  if (action.command.type === "pung" || action.command.type === "chow") {
+    const best = bestForcedDiscardCounts(after);
+    if (!best) return null;
+    return { counts: best.counts, melds: after.melds, evBias: 0 };
+  }
+  if (action.command.type === "kong") {
+    return {
+      counts: HandCounts.fromIds(after.concealed),
+      melds: after.melds,
+      evBias: weights.draw * 0.4,
+    };
+  }
+  return { counts: HandCounts.fromIds(after.concealed), melds: after.melds, evBias: 0 };
+}
+
+/** Greedy lowest-shanten discard after a claim (matches EV post-claim policy). */
+function bestForcedDiscardCounts(
+  after: HandSnapshot,
+): { counts: HandCounts; discarded: TileId } | null {
+  if (after.concealed.length === 0) return null;
+  let bestIdx = -1;
+  let bestSh = Infinity;
+  let bestTile: TileId | null = null;
+  const seen = new Set<TileId>();
+  for (let i = 0; i < after.concealed.length; i++) {
+    const tileId = after.concealed[i]!;
+    if (seen.has(tileId)) continue;
+    seen.add(tileId);
+    const concealed = after.concealed.slice(0, i).concat(after.concealed.slice(i + 1));
+    const counts = HandCounts.fromIds(concealed);
+    const sh = handShantenCounts(counts.counts, after.melds.length).shanten;
+    if (sh < bestSh) {
+      bestSh = sh;
+      bestIdx = i;
+      bestTile = tileId;
+    }
+  }
+  if (bestIdx < 0 || !bestTile) return null;
+  const concealed = after.concealed.slice(0, bestIdx).concat(after.concealed.slice(bestIdx + 1));
+  return { counts: HandCounts.fromIds(concealed), discarded: bestTile };
 }
 
 function cloneRemaining(tracker: TileTracker): Uint8Array {
@@ -60,21 +107,21 @@ function drawFromRemaining(remaining: Uint8Array, rng: () => number): number | n
   return null;
 }
 
-/** Discard index with highest shanten (simple rollout policy). */
+/** Discard the tile that leaves the lowest shanten (greedy rollout policy). */
 function rolloutDiscard(counts: HandCounts, openMelds: number): void {
-  let worstIdx = -1;
-  let worstSh = Infinity;
+  let bestIdx = -1;
+  let bestSh = Infinity;
   for (let idx = 0; idx < NUM_TILE_TYPES; idx++) {
     if (counts.counts[idx] === 0) continue;
     counts.removeIndex(idx);
     const sh = handShantenCounts(counts.counts, openMelds).shanten;
     counts.addIndex(idx);
-    if (sh >= worstSh) {
-      worstSh = sh;
-      worstIdx = idx;
+    if (sh < bestSh) {
+      bestSh = sh;
+      bestIdx = idx;
     }
   }
-  if (worstIdx >= 0) counts.removeIndex(worstIdx);
+  if (bestIdx >= 0) counts.removeIndex(bestIdx);
 }
 
 function simulateRollout(
@@ -95,6 +142,7 @@ function simulateRollout(
       melds,
       view.rulesetId,
       shape,
+      { seat, dealer: view.dealer?.dealer, roundWind: view.dealer?.roundWind },
     );
   }
 
@@ -104,14 +152,29 @@ function simulateRollout(
     counts.addIndex(drawn);
     const sh = handShantenCounts(counts.counts, openMelds);
     if (sh.shanten <= -1) {
-      return 80 + estimateFanPotential(countsToIds(counts), melds, view.rulesetId, sh.shape);
+      return 80 + estimateFanPotential(countsToIds(counts), melds, view.rulesetId, sh.shape, {
+        seat,
+        dealer: view.dealer?.dealer,
+        roundWind: view.dealer?.roundWind,
+      });
     }
-    if (sh.shanten === 0) return 40 + estimateFanPotential(countsToIds(counts), melds, view.rulesetId, sh.shape);
+    if (sh.shanten === 0) {
+      // Stay in tenpai and keep trying to win rather than stopping early.
+      rolloutDiscard(counts, openMelds);
+      continue;
+    }
     rolloutDiscard(counts, openMelds);
   }
 
   const final = handShantenCounts(counts.counts, openMelds);
-  return -final.shanten * 5 + estimateFanPotential(countsToIds(counts), melds, view.rulesetId, final.shape) * 0.5;
+  return (
+    -final.shanten * 5 +
+    estimateFanPotential(countsToIds(counts), melds, view.rulesetId, final.shape, {
+      seat,
+      dealer: view.dealer?.dealer,
+      roundWind: view.dealer?.roundWind,
+    }) * 0.5
+  );
 }
 
 function countsToIds(hand: HandCounts): TileId[] {
@@ -140,15 +203,22 @@ export function scoreActionMonteCarlo(
 
   const evScore = scoreAction(prompt, action, weights, tracker);
   const snap = snapshotHand(view, prompt.seat);
-  const applied = applyActionToCounts(view, prompt.seat, snap, action);
+  const applied = applyActionToCounts(view, prompt.seat, snap, action, weights);
   if (!applied) return -Infinity;
 
   const remaining = cloneRemaining(tracker);
   let sum = 0;
   for (let i = 0; i < options.rollouts; i++) {
-    sum += simulateRollout(view, prompt.seat, applied.counts, applied.melds, new Uint8Array(remaining), options);
+    sum += simulateRollout(
+      view,
+      prompt.seat,
+      applied.counts,
+      applied.melds,
+      new Uint8Array(remaining),
+      options,
+    );
   }
-  const mcMean = sum / options.rollouts;
+  const mcMean = sum / options.rollouts + applied.evBias;
   return evScore * 0.35 + mcMean * 0.65;
 }
 
@@ -174,4 +244,9 @@ export function pickBestActionMonteCarlo(
     }
   }
   return best;
+}
+
+/** Test helper — expose greedy discard policy. */
+export function testRolloutDiscard(counts: HandCounts, openMelds: number): void {
+  rolloutDiscard(counts, openMelds);
 }
